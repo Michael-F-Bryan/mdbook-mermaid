@@ -1,7 +1,7 @@
 use mdbook::book::{Book, BookItem, Chapter};
 use mdbook::errors::{Error, Result};
 use mdbook::preprocess::{Preprocessor, PreprocessorContext};
-use pulldown_cmark::{Event, Parser, Tag, Options};
+use pulldown_cmark::{Event, Options, Parser, Tag};
 use pulldown_cmark_to_cmark::fmt::cmark;
 
 pub struct Mermaid;
@@ -12,25 +12,31 @@ impl Preprocessor for Mermaid {
     }
 
     fn run(&self, _ctx: &PreprocessorContext, mut book: Book) -> Result<Book> {
-        let mut res = None;
-        book.for_each_mut(|item: &mut BookItem| {
-            if let Some(Err(_)) = res {
-                return;
-            }
+        apply_to_sections(&mut book.sections)?;
 
-            if let BookItem::Chapter(ref mut chapter) = *item {
-                res = Some(Mermaid::add_mermaid(chapter).map(|md| {
-                    chapter.content = md;
-                }));
-            }
-        });
-
-        res.unwrap_or(Ok(())).map(|_| book)
+        Ok(book)
     }
 
     fn supports_renderer(&self, renderer: &str) -> bool {
         renderer == "html"
     }
+}
+
+fn apply_to_sections(sections: &mut [BookItem]) -> Result<()> {
+    for section in sections {
+        match section {
+            BookItem::Chapter(ch) => apply_to_chapter(ch)?,
+            BookItem::Separator => {}
+        }
+    }
+
+    Ok(())
+}
+
+fn apply_to_chapter(chapter: &mut Chapter) -> Result<()> {
+    chapter.content = add_mermaid(&chapter.content)?;
+
+    apply_to_sections(&mut chapter.sub_items)
 }
 
 fn add_mermaid(content: &str) -> Result<String> {
@@ -84,12 +90,6 @@ fn add_mermaid(content: &str) -> Result<String> {
         .map_err(|err| Error::from(format!("Markdown serialization failed: {}", err)))
 }
 
-impl Mermaid {
-    fn add_mermaid(chapter: &mut Chapter) -> Result<String> {
-        add_mermaid(&chapter.content)
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::add_mermaid;
@@ -116,7 +116,6 @@ Text"#;
 
         assert_eq!(expected, add_mermaid(content).unwrap());
     }
-
 
     #[test]
     fn leaves_tables_untouched() {
